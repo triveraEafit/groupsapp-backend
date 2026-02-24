@@ -3,6 +3,9 @@ from sqlalchemy.orm import Session
 from app import models, schemas
 from app.database import SessionLocal
 from passlib.context import CryptContext
+from jose import jwt
+from datetime import datetime, timedelta
+from app.config import SECRET_KEY, ALGORITHM, ACCESS_TOKEN_EXPIRE_MINUTES
 
 router = APIRouter(prefix="/users", tags=["Users"])
 
@@ -35,7 +38,7 @@ def register(user: schemas.UserCreate, db: Session = Depends(get_db)):
     new_user = models.User(
         username=user.username,
         email=user.email,
-        password=hashed_password
+        hashed_password=hashed_password
     )
 
     db.add(new_user)
@@ -43,3 +46,24 @@ def register(user: schemas.UserCreate, db: Session = Depends(get_db)):
     db.refresh(new_user)
 
     return {"message": "User created successfully"}
+
+@router.post("/login")
+def login(user: schemas.UserLogin, db: Session = Depends(get_db)):
+    db_user = db.query(models.User).filter(models.User.email == user.email).first()
+
+    if not db_user:
+        raise HTTPException(status_code=400, detail="Invalid credentials")
+
+    if not pwd_context.verify(user.password, db_user.hashed_password):
+        raise HTTPException(status_code=400, detail="Invalid credentials")
+
+    expire = datetime.utcnow() + timedelta(minutes=ACCESS_TOKEN_EXPIRE_MINUTES)
+
+    to_encode = {
+        "sub": str(db_user.id),
+        "exp": expire
+    }
+
+    access_token = jwt.encode(to_encode, SECRET_KEY, algorithm=ALGORITHM)
+
+    return {"access_token": access_token, "token_type": "bearer"}

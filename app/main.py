@@ -1,6 +1,12 @@
 from fastapi import FastAPI
 from app.routers import users
 from app.database import engine, Base
+from jose import JWTError, jwt
+from datetime import datetime, timedelta
+
+SECRET_KEY = "supersecretkey"
+ALGORITHM = "HS256"
+ACCESS_TOKEN_EXPIRE_MINUTES = 60
 
 app = FastAPI()
 
