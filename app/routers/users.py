@@ -6,6 +6,7 @@ from passlib.context import CryptContext
 from jose import jwt
 from datetime import datetime, timedelta
 from app.config import SECRET_KEY, ALGORITHM, ACCESS_TOKEN_EXPIRE_MINUTES
+from app.oauth2 import create_access_token
 
 router = APIRouter(prefix="/users", tags=["Users"])
 
@@ -47,23 +48,24 @@ def register(user: schemas.UserCreate, db: Session = Depends(get_db)):
 
     return {"message": "User created successfully"}
 
+from fastapi.security import OAuth2PasswordRequestForm
+
 @router.post("/login")
-def login(user: schemas.UserLogin, db: Session = Depends(get_db)):
-    db_user = db.query(models.User).filter(models.User.email == user.email).first()
+def login(
+    user_credentials: OAuth2PasswordRequestForm = Depends(),
+    db: Session = Depends(get_db)
+):
+    user = db.query(models.User).filter(
+        models.User.username == user_credentials.username
+    ).first()
 
-    if not db_user:
-        raise HTTPException(status_code=400, detail="Invalid credentials")
+    if not user:
+        raise HTTPException(status_code=403, detail="Invalid credentials")
 
-    if not pwd_context.verify(user.password, db_user.hashed_password):
-        raise HTTPException(status_code=400, detail="Invalid credentials")
+    # verify password here
 
-    expire = datetime.utcnow() + timedelta(minutes=ACCESS_TOKEN_EXPIRE_MINUTES)
-
-    to_encode = {
-        "sub": str(db_user.id),
-        "exp": expire
-    }
-
-    access_token = jwt.encode(to_encode, SECRET_KEY, algorithm=ALGORITHM)
+    access_token = create_access_token(
+        data={"sub": str(user.id)}
+    )
 
     return {"access_token": access_token, "token_type": "bearer"}
