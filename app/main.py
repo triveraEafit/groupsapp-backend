@@ -5,8 +5,7 @@ from jose import JWTError, jwt
 from datetime import datetime, timedelta
 from app.routers import groups
 
-SECRET_KEY = "supersecretkey"
-ALGORITHM = "HS256"
+
 ACCESS_TOKEN_EXPIRE_MINUTES = 60
 
 app = FastAPI()
