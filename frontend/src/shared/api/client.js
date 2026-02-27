@@ -1,19 +1,18 @@
-const TOKEN_KEY = "groupsapp_token";
+import { tokenStorage } from "@/shared/auth/tokenStorage";
 
 export function setToken(token) {
-  localStorage.setItem(TOKEN_KEY, token);
+  tokenStorage.set(token);
 }
-
 export function getToken() {
-  return localStorage.getItem(TOKEN_KEY);
+  return tokenStorage.get();
 }
-
 export function clearToken() {
-  localStorage.removeItem(TOKEN_KEY);
+  tokenStorage.clear();
 }
 
 async function request(path, { method = "GET", headers = {}, body } = {}) {
   const token = getToken();
+
   const finalHeaders = {
     ...headers,
     ...(token ? { Authorization: `Bearer ${token}` } : {}),
@@ -25,24 +24,31 @@ async function request(path, { method = "GET", headers = {}, body } = {}) {
     body,
   });
 
-  let data = null;
   const contentType = res.headers.get("content-type") || "";
-  if (contentType.includes("application/json")) {
-    data = await res.json().catch(() => null);
-  } else {
-    data = await res.text().catch(() => null);
-  }
+  const data = contentType.includes("application/json")
+    ? await res.json().catch(() => null)
+    : await res.text().catch(() => null);
 
   if (!res.ok) {
-    const msg =
-      (data && data.detail && (typeof data.detail === "string" ? data.detail : JSON.stringify(data.detail))) ||
-      (typeof data === "string" && data) ||
-      `Request failed (${res.status})`;
-    const err = new Error(msg);
-    err.status = res.status;
-    err.data = data;
-    throw err;
+  if (res.status === 401) {
+    clearToken();
+    window.location.href = "/login";
   }
+
+  const msg =
+    (data &&
+      data.detail &&
+      (typeof data.detail === "string"
+        ? data.detail
+        : JSON.stringify(data.detail))) ||
+    (typeof data === "string" && data) ||
+    `Request failed (${res.status})`;
+
+  const err = new Error(msg);
+  err.status = res.status;
+  err.data = data;
+  throw err;
+}
 
   return data;
 }
@@ -57,13 +63,9 @@ export async function register({ username, email, password }) {
 }
 
 export async function login({ username, password }) {
-  // OAuth2 password form => application/x-www-form-urlencoded
   const form = new URLSearchParams();
   form.set("username", username);
   form.set("password", password);
-
-  // grant_type optional; some implementations require it
-  // form.set("grant_type", "password");
 
   const data = await request("/users/login", {
     method: "POST",
@@ -71,7 +73,6 @@ export async function login({ username, password }) {
     body: form.toString(),
   });
 
-  // Common FastAPI response: { access_token, token_type }
   const token = data?.access_token || data?.token;
   if (!token) throw new Error("Login OK but no token returned by backend.");
   setToken(token);

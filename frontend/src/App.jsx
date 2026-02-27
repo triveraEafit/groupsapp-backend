@@ -1,56 +1,49 @@
 import React from "react";
-import { Routes, Route, Navigate, Link, useNavigate } from "react-router-dom";
-import Login from "./pages/Login.jsx";
-import Register from "./pages/Register.jsx";
-import Groups from "./pages/Groups.jsx";
-import { getToken, clearToken } from "./api/client.js";
+import { Routes, Route, Navigate } from "react-router-dom";
 
-function Protected({ children }) {
-  const token = getToken();
-  if (!token) return <Navigate to="/login" replace />;
-  return children;
+import Login from "@/pages/Login.jsx";
+import Register from "@/pages/Register.jsx";
+import Groups from "@/pages/Groups.jsx";
+import GroupDetail from "@/pages/GroupDetail.jsx";
+import Chat from "@/pages/Chat.jsx";
+
+import { AuthLayout } from "@/layouts/AuthLayout";
+import { AppLayout } from "@/layouts/AppLayout";
+import { ProtectedRoute } from "@/app/router/ProtectedRoute";
+import { tokenStorage } from "@/shared/auth/tokenStorage";
+
+function HomeRedirect() {
+  const token = tokenStorage.get();
+  return <Navigate to={token ? "/groups" : "/login"} replace />;
 }
 
 export default function App() {
-  const navigate = useNavigate();
-  const token = getToken();
-
   return (
-    <div style={{ fontFamily: "system-ui", maxWidth: 900, margin: "0 auto", padding: 16 }}>
-      <header style={{ display: "flex", gap: 12, alignItems: "center", marginBottom: 16 }}>
-        <Link to="/" style={{ fontWeight: 700, textDecoration: "none" }}>GroupsApp</Link>
-        <div style={{ flex: 1 }} />
-        {token ? (
-          <button
-            onClick={() => {
-              clearToken();
-              navigate("/login");
-            }}
-          >
-            Logout
-          </button>
-        ) : (
-          <>
-            <Link to="/login">Login</Link>
-            <Link to="/register">Register</Link>
-          </>
-        )}
-      </header>
+    <Routes>
+      {/* Root */}
+      <Route path="/" element={<HomeRedirect />} />
 
-      <Routes>
-        <Route path="/" element={<Navigate to={token ? "/groups" : "/login"} replace />} />
+      {/* Auth */}
+      <Route element={<AuthLayout />}>
         <Route path="/login" element={<Login />} />
         <Route path="/register" element={<Register />} />
-        <Route
-          path="/groups"
-          element={
-            <Protected>
-              <Groups />
-            </Protected>
-          }
-        />
-        <Route path="*" element={<div>404</div>} />
-      </Routes>
-    </div>
+      </Route>
+
+      {/* App (protected) */}
+      <Route
+        element={
+          <ProtectedRoute>
+            <AppLayout />
+          </ProtectedRoute>
+        }
+      >
+        <Route path="/groups" element={<Groups />} />
+        <Route path="/groups/:id" element={<GroupDetail />} />
+        <Route path="/chat" element={<Chat />} />
+      </Route>
+
+      {/* Not found */}
+      <Route path="*" element={<div className="p-6 text-[rgb(var(--muted))]">404</div>} />
+    </Routes>
   );
 }
