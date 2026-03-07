@@ -10,7 +10,7 @@ from app.oauth2 import create_access_token
 
 router = APIRouter(prefix="/users", tags=["Users"])
 
-pwd_context = CryptContext(schemes=["bcrypt"], deprecated="auto")
+pwd_context = CryptContext(schemes=["pbkdf2_sha256"], deprecated="auto")
 
 
 def get_db():

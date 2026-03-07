@@ -35,7 +35,7 @@ class GroupMember(Base):
     group_id = Column(Integer, ForeignKey("groups.id", ondelete="CASCADE"))
 
 from sqlalchemy.sql import func
-from sqlalchemy import DateTime
+from sqlalchemy import DateTime, Boolean
 
 class Message(Base):
     __tablename__ = "messages"
@@ -45,3 +45,16 @@ class Message(Base):
     user_id = Column(Integer, ForeignKey("users.id", ondelete="CASCADE"))
     group_id = Column(Integer, ForeignKey("groups.id", ondelete="CASCADE"))
     created_at = Column(DateTime(timezone=True), server_default=func.now())
+
+class DirectMessage(Base):
+    __tablename__ = "direct_messages"
+    
+    id = Column(Integer, primary_key=True, index=True)
+    content = Column(String, nullable=False)
+    sender_id = Column(Integer, ForeignKey("users.id"), nullable=False)
+    receiver_id = Column(Integer, ForeignKey("users.id"), nullable=False)
+    created_at = Column(DateTime(timezone=True), server_default=func.now())
+    is_read = Column(Boolean, default=False)
+    
+    sender = relationship("User", foreign_keys=[sender_id])
+    receiver = relationship("User", foreign_keys=[receiver_id])
