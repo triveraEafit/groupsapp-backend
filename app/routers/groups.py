@@ -145,3 +145,167 @@ def get_my_groups(
     )
 
     return groups
+
+
+# ========== MENSAJES DIRECTOS 1 A 1 (MODELO 2: WebSocket por conversación) ==========
+
+@router.websocket("/dm/ws/{other_username}")
+async def dm_websocket_endpoint(websocket: WebSocket, other_username: str):
+    """
+    WebSocket para chat 1 a 1 con un usuario específico.
+    URL: ws://127.0.0.1:8000/groups/dm/ws/{username}?token=JWT
+    """
+    print(f"---- DM WebSocket attempt with {other_username} ----")
+
+    token = websocket.query_params.get("token")
+    
+    if not token:
+        print("NO TOKEN")
+        await websocket.close(code=1008)
+        return
+
+    try:
+        payload = verify_access_token(token)
+        user_id = int(payload.get("sub"))
+        print(f"USER ID: {user_id}")
+    except Exception as e:
+        print("TOKEN ERROR:", e)
+        await websocket.close(code=1008)
+        return
+
+    db = SessionLocal()
+
+    # Obtener usuario actual
+    current_user = db.query(models.User).filter(models.User.id == user_id).first()
+    if not current_user:
+        print("USER NOT FOUND")
+        await websocket.close(code=1008)
+        db.close()
+        return
+
+    # Obtener usuario con quien quiere chatear
+    other_user = db.query(models.User).filter(models.User.username == other_username).first()
+    if not other_user:
+        print(f"OTHER USER '{other_username}' NOT FOUND")
+        await websocket.close(code=1008)
+        db.close()
+        return
+
+    # No permitir chat consigo mismo
+    if current_user.id == other_user.id:
+        print("CANNOT CHAT WITH YOURSELF")
+        await websocket.close(code=1008)
+        db.close()
+        return
+
+    await manager.connect_dm(current_user.id, other_user.id, websocket)
+    print(f"DM CONNECTED: {current_user.username} <-> {other_user.username}")
+
+    # Marcar mensajes previos como leídos
+    db.query(models.DirectMessage).filter(
+        models.DirectMessage.sender_id == other_user.id,
+        models.DirectMessage.receiver_id == current_user.id,
+        models.DirectMessage.is_read == False
+    ).update({"is_read": True})
+    db.commit()
+
+    # Enviar mensaje de conexión
+    connection_msg = f"[Sistema] {current_user.username} se conectó al chat"
+    await manager.broadcast_dm(current_user.id, other_user.id, connection_msg)
+
+    try:
+        while True:
+            data = await websocket.receive_text()
+            print(f"DM MESSAGE: {current_user.username} -> {other_user.username}: {data}")
+
+            # Guardar mensaje en BD
+            dm = models.DirectMessage(
+                content=data,
+                sender_id=current_user.id,
+                receiver_id=other_user.id
+            )
+            db.add(dm)
+            db.commit()
+
+            # Formatear y enviar a todos en la conversación
+            formatted_msg = f"{current_user.username}: {data}"
+            await manager.broadcast_dm(current_user.id, other_user.id, formatted_msg)
+
+    except WebSocketDisconnect:
+        print(f"DM DISCONNECTED: {current_user.username} <-> {other_user.username}")
+        manager.disconnect_dm(current_user.id, other_user.id, websocket)
+        
+        # Mensaje de desconexión
+        disconnect_msg = f"[Sistema] {current_user.username} se desconectó"
+        await manager.broadcast_dm(current_user.id, other_user.id, disconnect_msg)
+    except Exception as e:
+        print(f"DM ERROR: {e}")
+        manager.disconnect_dm(current_user.id, other_user.id, websocket)
+    finally:
+        db.close()
+
+
+@router.get("/dm/history/{username}", response_model=list[schemas.DirectMessageResponse])
+def get_dm_history(
+    username: str,
+    db: Session = Depends(get_db),
+    current_user: models.User = Depends(get_current_user)
+):
+    """Obtener historial completo de mensajes con un usuario específico"""
+    
+    other_user = db.query(models.User).filter(
+        models.User.username == username
+    ).first()
+    
+    if not other_user:
+        raise HTTPException(status_code=404, detail="Usuario no encontrado")
+    
+    messages = db.query(models.DirectMessage).filter(
+        ((models.DirectMessage.sender_id == current_user.id) & 
+         (models.DirectMessage.receiver_id == other_user.id)) |
+        ((models.DirectMessage.sender_id == other_user.id) & 
+         (models.DirectMessage.receiver_id == current_user.id))
+    ).order_by(models.DirectMessage.created_at).all()
+    
+    return messages
+
+
+@router.get("/dm/unread", response_model=list[schemas.DirectMessageResponse])
+def get_unread_messages(
+    db: Session = Depends(get_db),
+    current_user: models.User = Depends(get_current_user)
+):
+    """Obtener todos los mensajes no leídos"""
+    
+    unread = db.query(models.DirectMessage).filter(
+        models.DirectMessage.receiver_id == current_user.id,
+        models.DirectMessage.is_read == False
+    ).order_by(models.DirectMessage.created_at).all()
+    
+    return unread
+
+
+@router.post("/dm/mark-read/{username}")
+def mark_messages_as_read(
+    username: str,
+    db: Session = Depends(get_db),
+    current_user: models.User = Depends(get_current_user)
+):
+    """Marcar todos los mensajes de un usuario como leídos"""
+    
+    other_user = db.query(models.User).filter(
+        models.User.username == username
+    ).first()
+    
+    if not other_user:
+        raise HTTPException(status_code=404, detail="Usuario no encontrado")
+    
+    updated = db.query(models.DirectMessage).filter(
+        models.DirectMessage.sender_id == other_user.id,
+        models.DirectMessage.receiver_id == current_user.id,
+        models.DirectMessage.is_read == False
+    ).update({"is_read": True})
+    
+    db.commit()
+    
+    return {"message": f"{updated} mensajes marcados como leídos"}

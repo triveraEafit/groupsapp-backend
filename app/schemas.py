@@ -1,4 +1,5 @@
 from pydantic import BaseModel
+from datetime import datetime
 
 class UserCreate(BaseModel):
     username: str
@@ -20,5 +21,16 @@ class GroupResponse(BaseModel):
     description: str
     owner_id: int
 
+    class Config:
+        from_attributes = True
+
+class DirectMessageResponse(BaseModel):
+    id: int
+    content: str
+    sender_id: int
+    receiver_id: int
+    created_at: datetime
+    is_read: bool
+    
     class Config:
         from_attributes = True
