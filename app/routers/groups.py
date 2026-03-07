@@ -117,3 +117,31 @@ async def websocket_endpoint(websocket: WebSocket, group_id: int):
     except WebSocketDisconnect:
         print("DISCONNECTED")
         manager.disconnect(group_id, websocket)
+
+@router.get("/{group_id}/messages")
+def get_group_messages(
+    group_id: int,
+    db: Session = Depends(get_db),
+    current_user: models.User = Depends(get_current_user)
+):
+
+    messages = db.query(models.Message).filter(
+        models.Message.group_id == group_id
+    ).order_by(models.Message.id).all()
+
+    return messages
+
+@router.get("/my-groups")
+def get_my_groups(
+    db: Session = Depends(get_db),
+    current_user: models.User = Depends(get_current_user)
+):
+
+    groups = (
+        db.query(models.Group)
+        .join(models.GroupMember, models.Group.id == models.GroupMember.group_id)
+        .filter(models.GroupMember.user_id == current_user.id)
+        .all()
+    )
+
+    return groups
