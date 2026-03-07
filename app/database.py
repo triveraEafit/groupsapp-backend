@@ -1,7 +1,8 @@
 from sqlalchemy import create_engine
 from sqlalchemy.orm import sessionmaker, declarative_base
 
-DATABASE_URL = "postgresql://postgres:cisco@localhost:5432/groupsapp"
+DATABASE_URL = "postgresql://postgres:password@localhost:5432/groupsapp"
+print("CONNECTED TO:", DATABASE_URL)
 
 engine = create_engine(DATABASE_URL)
 
@@ -12,3 +13,10 @@ SessionLocal = sessionmaker(
 )
 
 Base = declarative_base()
+
+def get_db():
+    db = SessionLocal()
+    try:
+        yield db
+    finally:
+        db.close()
