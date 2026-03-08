@@ -3,10 +3,14 @@ from sqlalchemy.orm import Session
 from app import models, schemas
 from app.database import SessionLocal
 from passlib.context import CryptContext
+from jose import jwt
+from datetime import datetime, timedelta
+from app.config import SECRET_KEY, ALGORITHM, ACCESS_TOKEN_EXPIRE_MINUTES
+from app.oauth2 import create_access_token
 
 router = APIRouter(prefix="/users", tags=["Users"])
 
-pwd_context = CryptContext(schemes=["bcrypt"], deprecated="auto")
+pwd_context = CryptContext(schemes=["pbkdf2_sha256"], deprecated="auto")
 
 
 def get_db():
@@ -35,7 +39,7 @@ def register(user: schemas.UserCreate, db: Session = Depends(get_db)):
     new_user = models.User(
         username=user.username,
         email=user.email,
-        password=hashed_password
+        hashed_password=hashed_password
     )
 
     db.add(new_user)
@@ -43,3 +47,25 @@ def register(user: schemas.UserCreate, db: Session = Depends(get_db)):
     db.refresh(new_user)
 
     return {"message": "User created successfully"}
+
+from fastapi.security import OAuth2PasswordRequestForm
+
+@router.post("/login")
+def login(
+    user_credentials: OAuth2PasswordRequestForm = Depends(),
+    db: Session = Depends(get_db)
+):
+    user = db.query(models.User).filter(
+        models.User.username == user_credentials.username
+    ).first()
+
+    if not user:
+        raise HTTPException(status_code=403, detail="Invalid credentials")
+
+    # verify password here
+
+    access_token = create_access_token(
+        data={"sub": str(user.id)}
+    )
+
+    return {"access_token": access_token, "token_type": "bearer"}
