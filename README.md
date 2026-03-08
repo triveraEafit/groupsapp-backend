@@ -1,6 +1,14 @@
 # GroupsApp
 
-Integracion del backend `login` con el frontend de chat en la rama `frontend-on-login`.
+Aplicacion de mensajeria con:
+- registro y login
+- grupos
+- chat grupal en tiempo real
+- mensajes directos 1 a 1
+- historial de mensajes
+- read receipts en mensajes directos
+- carga y descarga de archivos en mensajes directos
+- estado online/offline basado en conexiones WebSocket activas
 
 Stack actual:
 - Backend: FastAPI + SQLAlchemy + PostgreSQL + WebSocket
@@ -8,13 +16,26 @@ Stack actual:
 
 ## Requisitos
 
-- Python `3.13.9` probado localmente
-- Node `v24.13.1` y npm `11.10.0` probados localmente
-- PostgreSQL corriendo en local
+- Python 3.13
+- Node 24
+- npm 11
+- PostgreSQL local o remoto
 
-## Backend
+Versiones probadas en desarrollo:
+- Python `3.13.9`
+- Node `v24.13.1`
+- npm `11.10.0`
 
-### 1. Crear entorno virtual e instalar dependencias
+## Estructura
+
+- `app/`: backend FastAPI
+- `frontend/`: frontend React
+- `uploads/`: archivos cargados en mensajes directos
+- `requirements.txt`: dependencias de Python
+
+## Dependencias
+
+Backend:
 
 ```bash
 cd groupsapp-backend
@@ -24,26 +45,36 @@ pip install --upgrade pip
 pip install -r requirements.txt
 ```
 
-### 2. Configurar base de datos
+Frontend:
 
-El backend actual no toma la URL de la BD desde `.env`.
-La conexion esta hardcodeada en `app/database.py`:
+```bash
+cd groupsapp-backend/frontend
+npm ci
+```
+
+## Configuracion de base de datos
+
+La conexion a PostgreSQL esta definida actualmente en `app/database.py`:
 
 ```python
 DATABASE_URL = "postgresql://postgres:password@localhost:5432/groupsapp"
 ```
 
-Debes tener una base de datos local con esas credenciales, o editar ese archivo para usar las tuyas.
+Debes tener una base `groupsapp` disponible con esas credenciales, o ajustar ese archivo a tu entorno.
 
-Ejemplo para crear la base en PostgreSQL:
+Ejemplo minimo en PostgreSQL:
 
 ```sql
 CREATE DATABASE groupsapp;
 ```
 
-Si vienes de otra rama y tu esquema local esta viejo, lo correcto es recrear la BD antes de probar esta rama.
+Nota:
+- las tablas se crean al iniciar el backend
+- si vienes de otra rama con un esquema distinto, lo recomendable es recrear la base antes de probar
 
-### 3. Levantar backend
+## Como correr el proyecto
+
+### 1. Backend
 
 ```bash
 cd groupsapp-backend
@@ -51,71 +82,144 @@ source .venv/bin/activate
 python -m uvicorn app.main:app --reload
 ```
 
-Backend disponible en:
-- API root: `http://127.0.0.1:8000/`
+Disponible en:
+- API: `http://127.0.0.1:8000`
 - Swagger: `http://127.0.0.1:8000/docs`
 
-## Frontend
-
-### 1. Instalar dependencias
-
-```bash
-cd groupsapp-backend/frontend
-npm ci
-```
-
-### 2. Levantar frontend
+### 2. Frontend
 
 ```bash
 cd groupsapp-backend/frontend
 npm run dev
 ```
 
-Frontend disponible en:
-- `http://127.0.0.1:5173`
+Disponible en:
+- App: `http://127.0.0.1:5173`
 
-La configuracion de Vite ya proxya `/api` hacia `http://127.0.0.1:8000`, incluyendo WebSocket.
+El frontend usa proxy de Vite para redirigir `/api` a `http://127.0.0.1:8000`, incluyendo WebSocket.
 
-## Flujo de prueba recomendado
+## Como usar la aplicacion
+
+### Registro
+
+Para crear una cuenta:
+- ingresa `username`
+- ingresa `email`
+- ingresa una `password` de minimo 6 caracteres
+- confirma la misma password
+
+La UI valida:
+- password minima de 6 caracteres
+- confirmacion igual a la password
+
+### Login
+
+Inicia sesion con:
+- `username`
+- `password`
+
+### Grupos
+
+Puedes:
+- crear un grupo con nombre y descripcion
+- unirte a un grupo existente con el ID del grupo
+- ver tus grupos cargados desde `GET /groups/my-groups`
+- abrir el chat del grupo y enviar mensajes en tiempo real
+
+### Mensajes directos
+
+Puedes:
+- abrir un chat directo usando el `username` del otro usuario
+- ver historial completo
+- marcar mensajes como leidos
+- ver conteo de mensajes directos no leidos
+
+### Archivos
+
+Actualmente los archivos funcionan en mensajes directos:
+- selecciona un archivo con el boton `Attach`
+- el frontend lo envia al endpoint `POST /groups/dm/upload/{username}`
+- el backend guarda el archivo en `uploads/`
+- el mensaje queda asociado al archivo en la BD
+- el receptor puede descargarlo desde el chat
+
+### Online / Offline
+
+El backend mantiene una lista de usuarios online a partir de conexiones WebSocket activas.
+
+Se exponen endpoints para consultar presencia:
+- `GET /groups/online-users`
+- `GET /groups/user/{user_id}/online`
+- `GET /groups/user/by-username/{username}/online`
+
+## Flujo recomendado de prueba
 
 1. Levanta backend y frontend.
 2. Registra dos usuarios.
-3. Haz login con un usuario y crea un grupo.
-4. Desde el segundo usuario, entra al grupo por ID.
-5. Abre dos pestañas separadas o una ventana normal y otra en incognito.
-6. Prueba mensajes de grupo.
-7. Prueba mensaje directo usando el `username` del otro usuario.
+3. Haz login con el primer usuario.
+4. Crea un grupo.
+5. Abre otra sesion con el segundo usuario.
+6. Unete al grupo usando el ID.
+7. Prueba chat grupal en dos ventanas o una normal y otra en incognito.
+8. Prueba mensajes directos usando el username del otro usuario.
+9. Prueba enviar un archivo en un mensaje directo.
+10. Descarga el archivo desde el chat receptor.
 
-Nota: el frontend usa `sessionStorage`, no `localStorage`, para que cada pestaña pueda mantener una sesion distinta.
+## Endpoints principales
+
+Auth:
+- `POST /users/register`
+- `POST /users/login`
+
+Grupos:
+- `POST /groups/`
+- `POST /groups/{group_id}/join`
+- `GET /groups/my-groups`
+- `GET /groups/{group_id}/messages`
+- `WS /groups/ws/{group_id}?token=JWT`
+
+Mensajes directos:
+- `GET /groups/dm/history/{username}`
+- `GET /groups/dm/unread`
+- `POST /groups/dm/mark-read/{username}`
+- `POST /groups/dm/upload/{username}`
+- `GET /groups/dm/download/{message_id}?token=JWT`
+- `WS /groups/dm/ws/{username}?token=JWT`
 
 ## Comandos utiles
 
-### Build del frontend
+Build del frontend:
 
 ```bash
 cd groupsapp-backend/frontend
 npm run build
 ```
 
-### Estado del repo
+Estado del repo:
 
 ```bash
 git status
 ```
 
-## Limitaciones conocidas
+Actualizar una rama remota:
 
-- El backend actual no valida la contrasena en `POST /users/login`. Antes de desplegar, eso debe corregirse.
-- La presencia `online/offline` que ves en el frontend hoy representa el estado del WebSocket del chat actual, no una presencia global compartida entre usuarios.
-- El envio de archivos ya esta preparado en la UI, pero sigue pendiente el endpoint/backend real para subir, guardar y devolver metadata del archivo.
-- La configuracion sensible sigue hardcodeada en backend (`DATABASE_URL`, `SECRET_KEY`). Para AWS hay que mover eso a variables de entorno.
+```bash
+git pull origin <branch>
+```
 
-## Despliegue futuro
+## Limitaciones actuales
 
-Antes de AWS, faltan al menos estos ajustes:
+- `POST /users/login` todavia no valida realmente la password contra el hash almacenado; antes de un despliegue productivo eso debe corregirse.
+- `DATABASE_URL` y `SECRET_KEY` siguen definidos en el codigo y deben moverse a variables de entorno para AWS.
+- La presencia online depende de conexiones WebSocket activas; no reemplaza un sistema de presencia persistente.
+- Los archivos cargados se guardan localmente en `uploads/`; para AWS conviene mover eso a un storage externo.
 
-1. Mover `DATABASE_URL` y `SECRET_KEY` a variables de entorno.
-2. Corregir validacion real de password en login.
-3. Implementar subida real de archivos.
-4. Implementar presencia compartida real.
-5. Usar PostgreSQL administrado y storage para archivos.
+## Despliegue
+
+Para desplegar esta aplicacion en AWS, lo minimo recomendado es:
+
+1. mover credenciales y secretos a variables de entorno
+2. usar una base PostgreSQL administrada
+3. configurar almacenamiento persistente para archivos
+4. asegurar soporte de WebSocket en el balanceador o proxy
+5. corregir la validacion real de password en login
