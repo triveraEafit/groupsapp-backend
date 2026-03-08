@@ -11,6 +11,8 @@ import {
   getUnreadDirectMessages,
   getUserIdFromToken,
   markDirectMessagesAsRead,
+  uploadFileToUser,
+  getFileDownloadUrl,
 } from "@/shared/api/client";
 import { tokenStorage } from "@/shared/auth/tokenStorage";
 import { TextWebSocketClient } from "@/shared/wsClient";
@@ -347,7 +349,10 @@ export default function Chat() {
   }, [mode, activeGroupId, activeDmUsername]);
 
   useEffect(() => {
-    if (!canTargetConversation) return;
+    if (!canTargetConversation) {
+      setSocketStatus("offline");
+      return;
+    }
 
     wsRef.current?.close();
     setSocketStatus("connecting");
@@ -441,18 +446,38 @@ export default function Chat() {
 
     setError("");
 
-    if (file) {
-      addLocalFileMessage(
-        file,
-        text,
-        socketStatus === "online" ? "pending_backend" : "on_hold"
-      );
+    // Manejar archivo en DM
+    if (file && mode === "dm" && activeDmUsername) {
+      try {
+        const result = await uploadFileToUser(activeDmUsername, file);
+        setSocketNote(`File "${file.name}" uploaded successfully!`);
+        
+        // Recargar mensajes para mostrar el archivo
+        await loadDmHistory(activeDmUsername);
+        
+        setSelectedFile(null);
+        if (fileInputRef.current) {
+          fileInputRef.current.value = "";
+        }
+      } catch (uploadError) {
+        setError(`Failed to upload file: ${uploadError.message}`);
+        // Si falla, guardarlo localmente como fallback
+        addLocalFileMessage(
+          file,
+          text,
+          "upload_failed"
+        );
+      }
+    } else if (file && mode === "group") {
+      // Los grupos aún no soportan archivos
+      setSocketNote("File uploads are only available in direct messages for now.");
       setSelectedFile(null);
       if (fileInputRef.current) {
         fileInputRef.current.value = "";
       }
     }
 
+    // Manejar texto
     if (text) {
       if (socketStatus === "online") {
         try {
@@ -464,20 +489,6 @@ export default function Chat() {
       } else {
         queueMessage(text);
       }
-    }
-
-    if (file && !text) {
-      setSocketNote(
-        socketStatus === "online"
-          ? "Attachment kept in UI for testing. Backend upload support is still pending."
-          : "Attachment saved on hold locally. Backend upload support is still pending."
-      );
-    } else if (file && text) {
-      setSocketNote(
-        socketStatus === "online"
-          ? "Text sent. Attachment kept locally until backend upload support is ready."
-          : "Text queued and attachment saved locally until the connection and backend upload support are ready."
-      );
     }
 
     setComposer("");
@@ -497,6 +508,8 @@ export default function Chat() {
           ? "You"
           : `@${activeDmUsername}`;
 
+    const hasFile = message.file_name && message.file_path;
+
     return (
       <div
         key={`${mode}-server-${message.id}`}
@@ -515,9 +528,51 @@ export default function Chat() {
         >
           {authorLabel}
         </div>
-        <div className="mt-2 text-sm whitespace-pre-wrap break-words">
-          {message.content}
-        </div>
+        
+        {hasFile && (
+          <div className={[
+            "mt-2 rounded-xl px-3 py-2 border",
+            isMine 
+              ? "bg-white/10 border-white/20" 
+              : "bg-[rgb(var(--panel))] border-[rgb(var(--border))]"
+          ].join(" ")}>
+            <div className="flex items-center gap-2">
+              <span className="text-lg">📎</span>
+              <div className="flex-1 min-w-0">
+                <div className="text-sm font-semibold truncate">
+                  {message.file_name}
+                </div>
+                <div className={[
+                  "text-xs",
+                  isMine ? "text-white/70" : "text-[rgb(var(--muted))]"
+                ].join(" ")}>
+                  {humanFileSize(message.file_size)}
+                </div>
+              </div>
+              <a
+                href={getFileDownloadUrl(message.id)}
+                download={message.file_name}
+                target="_blank"
+                rel="noopener noreferrer"
+                className={[
+                  "rounded-lg px-3 py-1.5 text-xs font-medium transition",
+                  isMine
+                    ? "bg-white/20 hover:bg-white/30 text-white"
+                    : "bg-[rgb(var(--primary))] hover:bg-[rgb(var(--primary2))] text-white"
+                ].join(" ")}
+              >
+                Download
+              </a>
+            </div>
+          </div>
+        )}
+        
+        {message.content && (
+          <div className="mt-2 text-sm whitespace-pre-wrap break-words">
+            {message.content}
+          </div>
+        )}
+        
         <div
           className={[
             "mt-2 text-[11px]",

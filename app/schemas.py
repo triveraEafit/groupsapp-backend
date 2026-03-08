@@ -26,11 +26,15 @@ class GroupResponse(BaseModel):
 
 class DirectMessageResponse(BaseModel):
     id: int
-    content: str
+    content: str | None
     sender_id: int
     receiver_id: int
     created_at: datetime
     is_read: bool
+    file_name: str | None = None
+    file_path: str | None = None
+    file_size: int | None = None
+    file_type: str | None = None
     
     class Config:
         from_attributes = True

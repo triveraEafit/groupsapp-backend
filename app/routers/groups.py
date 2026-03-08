@@ -1,4 +1,4 @@
-from fastapi import APIRouter, Depends
+from fastapi import APIRouter, Depends, UploadFile, File
 from sqlalchemy.orm import Session
 from app.database import get_db
 from app import models, schemas
@@ -8,10 +8,19 @@ from fastapi import WebSocket, WebSocketDisconnect
 from app.websocket_manager import ConnectionManager
 from app.oauth2 import verify_access_token
 from app.database import SessionLocal
+from fastapi.responses import FileResponse
+import os
+import uuid
+from pathlib import Path
+
 router = APIRouter(
     prefix="/groups",
     tags=["Groups"]
 )
+
+# Directorio para guardar archivos
+UPLOAD_DIR = Path("uploads")
+UPLOAD_DIR.mkdir(exist_ok=True)
 
 
 @router.post("/", response_model=schemas.GroupResponse)
@@ -95,7 +104,7 @@ async def websocket_endpoint(websocket: WebSocket, group_id: int):
         await websocket.close(code=1008)
         return
 
-    await manager.connect(group_id, websocket)
+    await manager.connect(group_id, websocket, user_id)
     print("CONNECTED SUCCESSFULLY")
 
     try:
@@ -116,7 +125,9 @@ async def websocket_endpoint(websocket: WebSocket, group_id: int):
 
     except WebSocketDisconnect:
         print("DISCONNECTED")
-        manager.disconnect(group_id, websocket)
+        manager.disconnect(group_id, websocket, user_id)
+    finally:
+        db.close()
 
 @router.get("/{group_id}/messages")
 def get_group_messages(
@@ -147,7 +158,6 @@ def get_my_groups(
     return groups
 
 
-# ========== MENSAJES DIRECTOS 1 A 1 (MODELO 2: WebSocket por conversación) ==========
 
 @router.websocket("/dm/ws/{other_username}")
 async def dm_websocket_endpoint(websocket: WebSocket, other_username: str):
@@ -175,7 +185,6 @@ async def dm_websocket_endpoint(websocket: WebSocket, other_username: str):
 
     db = SessionLocal()
 
-    # Obtener usuario actual
     current_user = db.query(models.User).filter(models.User.id == user_id).first()
     if not current_user:
         print("USER NOT FOUND")
@@ -183,7 +192,6 @@ async def dm_websocket_endpoint(websocket: WebSocket, other_username: str):
         db.close()
         return
 
-    # Obtener usuario con quien quiere chatear
     other_user = db.query(models.User).filter(models.User.username == other_username).first()
     if not other_user:
         print(f"OTHER USER '{other_username}' NOT FOUND")
@@ -191,7 +199,6 @@ async def dm_websocket_endpoint(websocket: WebSocket, other_username: str):
         db.close()
         return
 
-    # No permitir chat consigo mismo
     if current_user.id == other_user.id:
         print("CANNOT CHAT WITH YOURSELF")
         await websocket.close(code=1008)
@@ -201,7 +208,6 @@ async def dm_websocket_endpoint(websocket: WebSocket, other_username: str):
     await manager.connect_dm(current_user.id, other_user.id, websocket)
     print(f"DM CONNECTED: {current_user.username} <-> {other_user.username}")
 
-    # Marcar mensajes previos como leídos
     db.query(models.DirectMessage).filter(
         models.DirectMessage.sender_id == other_user.id,
         models.DirectMessage.receiver_id == current_user.id,
@@ -209,7 +215,6 @@ async def dm_websocket_endpoint(websocket: WebSocket, other_username: str):
     ).update({"is_read": True})
     db.commit()
 
-    # Enviar mensaje de conexión
     connection_msg = f"[Sistema] {current_user.username} se conectó al chat"
     await manager.broadcast_dm(current_user.id, other_user.id, connection_msg)
 
@@ -218,7 +223,6 @@ async def dm_websocket_endpoint(websocket: WebSocket, other_username: str):
             data = await websocket.receive_text()
             print(f"DM MESSAGE: {current_user.username} -> {other_user.username}: {data}")
 
-            # Guardar mensaje en BD
             dm = models.DirectMessage(
                 content=data,
                 sender_id=current_user.id,
@@ -227,7 +231,6 @@ async def dm_websocket_endpoint(websocket: WebSocket, other_username: str):
             db.add(dm)
             db.commit()
 
-            # Formatear y enviar a todos en la conversación
             formatted_msg = f"{current_user.username}: {data}"
             await manager.broadcast_dm(current_user.id, other_user.id, formatted_msg)
 
@@ -235,7 +238,6 @@ async def dm_websocket_endpoint(websocket: WebSocket, other_username: str):
         print(f"DM DISCONNECTED: {current_user.username} <-> {other_user.username}")
         manager.disconnect_dm(current_user.id, other_user.id, websocket)
         
-        # Mensaje de desconexión
         disconnect_msg = f"[Sistema] {current_user.username} se desconectó"
         await manager.broadcast_dm(current_user.id, other_user.id, disconnect_msg)
     except Exception as e:
@@ -309,3 +311,179 @@ def mark_messages_as_read(
     db.commit()
     
     return {"message": f"{updated} mensajes marcados como leídos"}
+
+
+@router.get("/online-users")
+def get_online_users(
+    db: Session = Depends(get_db),
+    current_user: models.User = Depends(get_current_user)
+):
+    """Devuelve lista de usuarios online"""
+    online_user_ids = manager.get_online_users()
+    
+    if not online_user_ids:
+        return []
+    
+    users = db.query(models.User).filter(
+        models.User.id.in_(online_user_ids)
+    ).all()
+    
+    return [{"id": u.id, "username": u.username, "email": u.email} for u in users]
+
+
+@router.get("/user/{user_id}/online")
+def check_user_online(
+    user_id: int,
+    current_user: models.User = Depends(get_current_user)
+):
+    """Verificar si un usuario específico está online"""
+    return {"user_id": user_id, "is_online": manager.is_user_online(user_id)}
+
+
+@router.get("/user/by-username/{username}/online")
+def check_user_online_by_username(
+    username: str,
+    db: Session = Depends(get_db),
+    current_user: models.User = Depends(get_current_user)
+):
+    """Verificar si un usuario específico está online por su username"""
+    user = db.query(models.User).filter(models.User.username == username).first()
+    
+    if not user:
+        raise HTTPException(status_code=404, detail="Usuario no encontrado")
+    
+    return {
+        "user_id": user.id,
+        "username": user.username,
+        "is_online": manager.is_user_online(user.id)
+    }
+
+
+@router.post("/dm/upload/{username}")
+async def upload_file_to_user(
+    username: str,
+    file: UploadFile = File(...),
+    db: Session = Depends(get_db),
+    current_user: models.User = Depends(get_current_user)
+):
+    """Subir un archivo y enviarlo como mensaje directo a un usuario"""
+    
+    # Verificar que el usuario receptor existe
+    receiver = db.query(models.User).filter(models.User.username == username).first()
+    if not receiver:
+        raise HTTPException(status_code=404, detail="Usuario no encontrado")
+    
+    # Generar nombre único para el archivo
+    file_extension = os.path.splitext(file.filename)[1]
+    unique_filename = f"{uuid.uuid4()}{file_extension}"
+    file_path = UPLOAD_DIR / unique_filename
+    
+    # Guardar archivo
+    try:
+        contents = await file.read()
+        with open(file_path, "wb") as f:
+            f.write(contents)
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"Error al guardar archivo: {str(e)}")
+    
+    # Crear mensaje con el archivo adjunto
+    dm = models.DirectMessage(
+        content=f"📎 File attachment: {file.filename}",
+        sender_id=current_user.id,
+        receiver_id=receiver.id,
+        file_name=file.filename,
+        file_path=str(unique_filename),  # Guardar solo el nombre, no la ruta completa
+        file_size=len(contents),
+        file_type=file.content_type
+    )
+    
+    db.add(dm)
+    db.commit()
+    db.refresh(dm)
+    
+    # Notificar vía WebSocket si el usuario está conectado
+    try:
+        message_data = f"[ARCHIVO] {current_user.username} envió: {file.filename}"
+        await manager.broadcast_dm(current_user.id, receiver.id, message_data)
+    except:
+        pass  # Si no está conectado, el mensaje quedará guardado
+    
+    return {
+        "message": "Archivo subido correctamente",
+        "file_id": dm.id,
+        "file_name": file.filename,
+        "file_size": len(contents)
+    }
+
+
+@router.get("/dm/download/{message_id}")
+async def download_file(
+    message_id: int,
+    token: str = None,
+    db: Session = Depends(get_db)
+):
+    """Descargar un archivo adjunto de un mensaje
+    
+    Acepta autenticación vía query param: ?token={token}
+    """
+    
+    print(f"📥 Download request for message_id={message_id}, token present: {bool(token)}")
+    
+    # Autenticar con el token del query parameter
+    if not token:
+        print("❌ No token provided")
+        raise HTTPException(status_code=401, detail="Token requerido en query parameter")
+    
+    try:
+        payload = verify_access_token(token)
+        user_id = int(payload.get("sub"))
+        print(f"✅ Token verified, user_id={user_id}")
+        current_user = db.query(models.User).filter(models.User.id == user_id).first()
+        if not current_user:
+            print(f"❌ User {user_id} not found in database")
+            raise HTTPException(status_code=401, detail="Usuario no encontrado")
+        print(f"✅ User found: {current_user.username}")
+    except HTTPException:
+        raise
+    except Exception as e:
+        print(f"❌ Token error: {e}")
+        raise HTTPException(status_code=401, detail=f"Token inválido: {str(e)}")
+    
+    # Buscar el mensaje
+    message = db.query(models.DirectMessage).filter(
+        models.DirectMessage.id == message_id
+    ).first()
+    
+    if not message:
+        print(f"❌ Message {message_id} not found")
+        raise HTTPException(status_code=404, detail="Mensaje no encontrado")
+    
+    print(f"✅ Message found: sender={message.sender_id}, receiver={message.receiver_id}")
+    print(f"   File: {message.file_name} -> {message.file_path}")
+    
+    # Verificar que el usuario actual es el emisor o receptor
+    if message.sender_id != current_user.id and message.receiver_id != current_user.id:
+        print(f"❌ User {current_user.id} not authorized (not sender or receiver)")
+        raise HTTPException(status_code=403, detail="No tienes permiso para descargar este archivo")
+    
+    # Verificar que el mensaje tiene un archivo adjunto
+    if not message.file_path:
+        print("❌ Message has no file attached")
+        raise HTTPException(status_code=404, detail="Este mensaje no tiene archivo adjunto")
+    
+    # Construir ruta completa del archivo
+    file_path = UPLOAD_DIR / message.file_path
+    print(f"📁 Looking for file at: {file_path}")
+    print(f"   File exists: {file_path.exists()}")
+    
+    if not file_path.exists():
+        print(f"❌ File not found on disk: {file_path}")
+        raise HTTPException(status_code=404, detail="Archivo no encontrado en el servidor")
+    
+    print(f"✅ Serving file: {message.file_name}")
+    # Devolver el archivo
+    return FileResponse(
+        path=file_path,
+        filename=message.file_name,
+        media_type=message.file_type or "application/octet-stream"
+    )

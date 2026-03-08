@@ -132,3 +132,35 @@ export async function markDirectMessagesAsRead(username) {
     method: "POST",
   });
 }
+
+export async function uploadFileToUser(username, file) {
+  const token = getToken();
+  const formData = new FormData();
+  formData.append('file', file);
+
+  const res = await fetch(`/api/groups/dm/upload/${encodeURIComponent(username)}`, {
+    method: 'POST',
+    headers: {
+      'Authorization': `Bearer ${token}`
+    },
+    body: formData
+  });
+
+  const data = await res.json().catch(() => null);
+
+  if (!res.ok) {
+    if (res.status === 401) {
+      clearToken();
+      window.location.href = "/login";
+    }
+    const msg = data?.detail || 'Upload failed';
+    throw new Error(msg);
+  }
+
+  return data;
+}
+
+export function getFileDownloadUrl(messageId) {
+  const token = getToken();
+  return `/api/groups/dm/download/${messageId}?token=${encodeURIComponent(token)}`;
+}
