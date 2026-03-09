@@ -8,18 +8,16 @@ from fastapi import WebSocket, WebSocketDisconnect
 from app.websocket_manager import ConnectionManager
 from app.oauth2 import verify_access_token
 from app.database import SessionLocal
+from app.config import UPLOAD_DIR
 from fastapi.responses import FileResponse
 import os
 import uuid
-from pathlib import Path
 
 router = APIRouter(
     prefix="/groups",
     tags=["Groups"]
 )
 
-# Directorio para guardar archivos
-UPLOAD_DIR = Path("uploads")
 UPLOAD_DIR.mkdir(exist_ok=True)
 
 
