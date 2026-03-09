@@ -3,9 +3,6 @@ from sqlalchemy.orm import Session
 from app import models, schemas
 from app.database import SessionLocal
 from passlib.context import CryptContext
-from jose import jwt
-from datetime import datetime, timedelta
-from app.config import SECRET_KEY, ALGORITHM, ACCESS_TOKEN_EXPIRE_MINUTES
 from app.oauth2 import create_access_token
 
 router = APIRouter(prefix="/users", tags=["Users"])
@@ -23,6 +20,9 @@ def get_db():
 
 @router.post("/register")
 def register(user: schemas.UserCreate, db: Session = Depends(get_db)):
+    if len(user.password.strip()) < 6:
+        raise HTTPException(status_code=400, detail="Password must be at least 6 characters")
+
     # Check if user already exists
     existing_user = db.query(models.User).filter(
         (models.User.username == user.username) |
@@ -59,10 +59,8 @@ def login(
         models.User.username == user_credentials.username
     ).first()
 
-    if not user:
+    if not user or not pwd_context.verify(user_credentials.password, user.hashed_password):
         raise HTTPException(status_code=403, detail="Invalid credentials")
-
-    # verify password here
 
     access_token = create_access_token(
         data={"sub": str(user.id)}

@@ -52,23 +52,28 @@ cd groupsapp-backend/frontend
 npm ci
 ```
 
-## Configuracion de base de datos
+## Configuracion por entorno
 
-La conexion a PostgreSQL esta definida actualmente en `app/database.py`:
+Copia `.env.example` a `.env` y ajusta los valores:
 
-```python
-DATABASE_URL = "postgresql://postgres:password@localhost:5432/groupsapp"
+```bash
+cp .env.example .env
 ```
 
-Debes tener una base `groupsapp` disponible con esas credenciales, o ajustar ese archivo a tu entorno.
+Variables requeridas:
 
-Ejemplo minimo en PostgreSQL:
-
-```sql
-CREATE DATABASE groupsapp;
+```env
+DATABASE_URL=postgresql://postgres:password@localhost:5432/groupsapp
+SECRET_KEY=change-this-secret-before-deploying
+ALGORITHM=HS256
+ACCESS_TOKEN_EXPIRE_MINUTES=60
+UPLOAD_DIR=uploads
 ```
 
-Nota:
+Notas:
+- `DATABASE_URL` ya no se deja hardcodeada en el codigo
+- `SECRET_KEY` debe cambiarse antes de desplegar
+- `UPLOAD_DIR` define la carpeta donde se guardan archivos DM
 - las tablas se crean al iniciar el backend
 - si vienes de otra rama con un esquema distinto, lo recomendable es recrear la base antes de probar
 
@@ -108,7 +113,7 @@ Para crear una cuenta:
 - ingresa una `password` de minimo 6 caracteres
 - confirma la misma password
 
-La UI valida:
+La app valida:
 - password minima de 6 caracteres
 - confirmacion igual a la password
 
@@ -209,10 +214,9 @@ git pull origin <branch>
 
 ## Limitaciones actuales
 
-- `POST /users/login` todavia no valida realmente la password contra el hash almacenado; antes de un despliegue productivo eso debe corregirse.
-- `DATABASE_URL` y `SECRET_KEY` siguen definidos en el codigo y deben moverse a variables de entorno para AWS.
 - La presencia online depende de conexiones WebSocket activas; no reemplaza un sistema de presencia persistente.
-- Los archivos cargados se guardan localmente en `uploads/`; para AWS conviene mover eso a un storage externo.
+- Los archivos cargados se guardan localmente en `UPLOAD_DIR`; para AWS conviene mover eso a un storage externo.
+- Si vas a publicar la app en internet, usa una `SECRET_KEY` fuerte y una `DATABASE_URL` segura desde variables de entorno.
 
 ## Despliegue
 
